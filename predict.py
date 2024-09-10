@@ -19,7 +19,11 @@ from transformers import BlipProcessor, BlipForConditionalGeneration
 from cog import BasePredictor, Input, Path, BaseModel
 
 sys.path.append("..")
-from segment_anything import sam_model_registry, SamAutomaticMaskGenerator
+#from segment_anything import sam_model_registry, SamAutomaticMaskGenerator
+
+from sam2.automatic_mask_generator import SAM2AutomaticMaskGenerator
+from sam2.build_sam import build_sam2
+
 
 sys.path.insert(0, "scripts")
 from configs.ade20k_id2label import CONFIG as CONFIG_ADE20K_ID2LABEL
@@ -41,70 +45,83 @@ class ModelOutput(BaseModel):
 class Predictor(BasePredictor):
     def setup(self):
         """Load the model into memory to make running multiple predictions efficient"""
-        sam_checkpoint = "sam_vit_h_4b8939.pth"
+        sam_checkpoint = "./checkpoints/sam2_hiera_large.pt"
+        model_cfg = "sam2_hiera_l.yaml"
         model_type = "default"
-        self.sam = sam_model_registry[model_type](checkpoint=sam_checkpoint).to("cuda")
-        self.generator = SamAutomaticMaskGenerator(self.sam, output_mode="coco_rle")
+        # self.sam = sam_model_registry[model_type](checkpoint=sam_checkpoint).to("cuda")
+        # self.generator = SamAutomaticMaskGenerator(self.sam, output_mode="coco_rle")
+        self.sam = build_sam2(model_cfg, sam_checkpoint, device="cuda")
+        
+        self.generator = SAM2AutomaticMaskGenerator(self.sam,
+                                            points_per_side=64,
+                                            points_per_batch=128,
+                                            pred_iou_thresh=0.7,
+                                            stability_score_thresh=0.92,
+                                            stability_score_offset=0.7,
+                                            crop_n_layers=1,
+                                            box_nms_thresh=0.7)
 
         # semantic segmentation
+        '''
         rank = 0
         # the following models are pre-downloaded and cached to MODEL_CACHE to speed up inference 
         self.clip_processor = CLIPProcessor.from_pretrained(
             "openai/clip-vit-large-patch14",
             cache_dir=MODEL_CACHE,
-            local_files_only=True,
+            local_files_only=False,
         )
         self.clip_model = CLIPModel.from_pretrained(
             "openai/clip-vit-large-patch14",
             cache_dir=MODEL_CACHE,
-            local_files_only=True,
+            local_files_only=False,
         ).to(rank)
 
         self.oneformer_ade20k_processor = OneFormerProcessor.from_pretrained(
             "shi-labs/oneformer_ade20k_swin_large",
             cache_dir=MODEL_CACHE,
-            local_files_only=True,
+            local_files_only=False,
         )
         self.oneformer_ade20k_model = OneFormerForUniversalSegmentation.from_pretrained(
             "shi-labs/oneformer_ade20k_swin_large",
             cache_dir=MODEL_CACHE,
-            local_files_only=True,
+            local_files_only=False,
         ).to(rank)
 
         self.oneformer_coco_processor = OneFormerProcessor.from_pretrained(
             "shi-labs/oneformer_coco_swin_large",
             cache_dir=MODEL_CACHE,
-            local_files_only=True,
+            local_files_only=False,
         )
         self.oneformer_coco_model = OneFormerForUniversalSegmentation.from_pretrained(
             "shi-labs/oneformer_coco_swin_large",
             cache_dir=MODEL_CACHE,
-            local_files_only=True,
+            local_files_only=False,
         ).to(rank)
 
         self.blip_processor = BlipProcessor.from_pretrained(
             "Salesforce/blip-image-captioning-large",
             cache_dir=MODEL_CACHE,
-            local_files_only=True,
+            local_files_only=False,
         )
         self.blip_model = BlipForConditionalGeneration.from_pretrained(
             "Salesforce/blip-image-captioning-large",
             cache_dir=MODEL_CACHE,
-            local_files_only=True,
+            local_files_only=False,
         ).to(rank)
 
         self.clipseg_processor = AutoProcessor.from_pretrained(
             "CIDAS/clipseg-rd64-refined",
             cache_dir=MODEL_CACHE,
-            local_files_only=True,
+            local_files_only=False,
         )
         self.clipseg_model = CLIPSegForImageSegmentation.from_pretrained(
             "CIDAS/clipseg-rd64-refined",
             cache_dir=MODEL_CACHE,
-            local_files_only=True,
+            local_files_only=False,
         ).to(rank)
         self.clipseg_processor.image_processor.do_resize = False
-
+        '''
+        
     def predict(
         self,
         image: Path = Input(description="Input image"),
@@ -116,9 +133,14 @@ class Predictor(BasePredictor):
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         masks = self.generator.generate(img)
 
+        for mask in masks:
+            if "segmentation" in mask:
+                mask["segmentation"] = mask["segmentation"].tolist()
+
         seg_json = "/tmp/mask.json"
         with open(seg_json, "w") as f:
             json.dump(masks, f)
+
 
         json_out = "/tmp/seg_out.json"
         seg_out = "/tmp/seg_out.png"
@@ -296,3 +318,5 @@ def semantic_annotation_pipeline(
         show=False,
         out_file=seg_out,
     )
+
+
