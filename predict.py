@@ -62,7 +62,6 @@ class Predictor(BasePredictor):
                                             box_nms_thresh=0.7)
 
         # semantic segmentation
-        '''
         rank = 0
         # the following models are pre-downloaded and cached to MODEL_CACHE to speed up inference 
         self.clip_processor = CLIPProcessor.from_pretrained(
@@ -75,7 +74,6 @@ class Predictor(BasePredictor):
             cache_dir=MODEL_CACHE,
             local_files_only=False,
         ).to(rank)
-
         self.oneformer_ade20k_processor = OneFormerProcessor.from_pretrained(
             "shi-labs/oneformer_ade20k_swin_large",
             cache_dir=MODEL_CACHE,
@@ -86,7 +84,7 @@ class Predictor(BasePredictor):
             cache_dir=MODEL_CACHE,
             local_files_only=False,
         ).to(rank)
-
+        """
         self.oneformer_coco_processor = OneFormerProcessor.from_pretrained(
             "shi-labs/oneformer_coco_swin_large",
             cache_dir=MODEL_CACHE,
@@ -98,6 +96,7 @@ class Predictor(BasePredictor):
             local_files_only=False,
         ).to(rank)
 
+        """
         self.blip_processor = BlipProcessor.from_pretrained(
             "Salesforce/blip-image-captioning-large",
             cache_dir=MODEL_CACHE,
@@ -120,7 +119,6 @@ class Predictor(BasePredictor):
             local_files_only=False,
         ).to(rank)
         self.clipseg_processor.image_processor.do_resize = False
-        '''
         
     def predict(
         self,
@@ -143,7 +141,8 @@ class Predictor(BasePredictor):
 
 
         json_out = "/tmp/seg_out.json"
-        seg_out = "/tmp/seg_out.png"
+        #seg_out = "/tmp/seg_out.png"
+        seg_out = "data/seg_out.png"
 
         semantic_annotation_pipeline(
             seg_json,
@@ -154,8 +153,8 @@ class Predictor(BasePredictor):
             clip_model=self.clip_model,
             oneformer_ade20k_processor=self.oneformer_ade20k_processor,
             oneformer_ade20k_model=self.oneformer_ade20k_model,
-            oneformer_coco_processor=self.oneformer_coco_processor,
-            oneformer_coco_model=self.oneformer_coco_model,
+            #oneformer_coco_processor=self.oneformer_coco_processor,
+            #oneformer_coco_model=self.oneformer_coco_model,
             blip_processor=self.blip_processor,
             blip_model=self.blip_model,
             clipseg_processor=self.clipseg_processor,
@@ -189,21 +188,29 @@ def semantic_annotation_pipeline(
     anns = mmcv.load(seg_json)
     img = mmcv.imread(image)
     bitmasks, class_names = [], []
+    """
     class_ids_from_oneformer_coco = oneformer_coco_segmentation(
         Image.fromarray(img), oneformer_coco_processor, oneformer_coco_model, 0
     )
+    """
     class_ids_from_oneformer_ade20k = oneformer_ade20k_segmentation(
         Image.fromarray(img), oneformer_ade20k_processor, oneformer_ade20k_model, 0
     )
 
     for ann in anns:
-        valid_mask = torch.tensor(maskUtils.decode(ann["segmentation"])).bool()
+        #valid_mask = torch.tensor(maskUtils.decode(ann["segmentation"])).bool()
+        #print(type(maskUtils.decode(ann["segmentation"]))[0][0])
+        valid_mask = torch.tensor(ann["segmentation"])
         # get the class ids of the valid pixels
+        """
         coco_propose_classes_ids = class_ids_from_oneformer_coco[valid_mask]
+        """
         ade20k_propose_classes_ids = class_ids_from_oneformer_ade20k[valid_mask]
+        """
         top_k_coco_propose_classes_ids = (
             torch.bincount(coco_propose_classes_ids.flatten()).topk(1).indices
         )
+        """
         top_k_ade20k_propose_classes_ids = (
             torch.bincount(ade20k_propose_classes_ids.flatten()).topk(1).indices
         )
@@ -217,6 +224,7 @@ def semantic_annotation_pipeline(
                 ]
             ),
         )
+        """
         local_class_names = set.union(
             local_class_names,
             set(
@@ -228,6 +236,7 @@ def semantic_annotation_pipeline(
                 )
             ),
         )
+        """
         patch_small = mmcv.imcrop(
             img,
             np.array(
@@ -305,18 +314,24 @@ def semantic_annotation_pipeline(
         ann["class_name"] = str(top_1_mask_category)
         ann["class_proposals"] = mask_categories
         class_names.append(ann["class_name"])
-        bitmasks.append(maskUtils.decode(ann["segmentation"]))
+        #bitmasks.append(maskUtils.decode(ann["segmentation"]))
+        bitmasks.append(ann["segmentation"])
 
     mmcv.dump(anns, json_out)
+
+    # Resize the image to 4096x4096 using np.resize
+    #img_resized = np.resize(img, (4096, 4096, img.shape[2]))
+    dummy_labels = np.zeros(len(bitmasks), dtype=int)
+    
     imshow_det_bboxes(
         img,
         bboxes=None,
         labels=np.arange(len(bitmasks)),
         segms=np.stack(bitmasks),
         class_names=class_names,
-        font_size=25,
+        font_size=5,
         show=False,
         out_file=seg_out,
     )
-
+    
 

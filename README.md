@@ -1,3 +1,7 @@
+# INFO
+- install mmcv==1.7.2 via https://mmcv.readthedocs.io/en/latest/get_started/installation.html
+- install en-core-web-sm via python -m spacy download en_core_web_sm
+
 <p align="center">
   <img src="./figures/SSA_title.png" alt="SSA Icon"/>
 </p>
